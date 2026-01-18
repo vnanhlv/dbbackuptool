@@ -29,3 +29,9 @@ local:
   backup_dir: "d:/Coding/tool/backuptool/dumps"
   # Filename for the local backup
   backup_filename: "prod_chatbot_backup.sql.gz"
+  # Local DB Connection for restore_local
+  host: "localhost"
+  port: 5432
+  db_user: "local_user" # Change if different
+  db_name: "local_db" # Change if different
+  db_password: "local_password" # Change if different

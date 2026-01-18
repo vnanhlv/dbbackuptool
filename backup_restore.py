@@ -3,6 +3,9 @@ import yaml
 import os
 import sys
 import datetime
+import subprocess
+import gzip
+import shutil
 from fabric import Connection
 from invoke import UnexpectedExit
 
@@ -217,41 +220,65 @@ def restore_staging(config, filename, clean=False):
     finally:
         conn.close()
 
-# ... (inside main) ...
-
-def main():
-    parser = argparse.ArgumentParser(description="Database Backup & Restore Tool")
-    parser.add_argument('action', choices=['backup', 'download', 'upload', 'restore', 'full', 'test', 'backup_staging', 'download_staging'], 
-                        help="Action to perform")
-    parser.add_argument('--config', default='config.yaml', help="Path to config file")
-    parser.add_argument('--file', help="Specific filename to use. Optional.")
-    parser.add_argument('--clean', action='store_true', help="[Restore/Full] Drop and recreate 'public' schema before restoring. WARNING: Destructive!")
+def restore_local(config, filename, clean=False):
+    print(f"--- [RESTORE LOCAL] Restoring to Local Database (File: {filename}) ---")
+    local_conf = config['local']
     
-    args = parser.parse_args()
-    config = load_config(args.config)
-    
-    # ... (Filename logic unchanged) ...
+    backup_path = os.path.join(local_conf['backup_dir'], filename)
+    if not os.path.exists(backup_path):
+        print(f"Error: Backup file not found at {backup_path}")
+        sys.exit(1)
 
-    if args.action == 'test':
-        test_connections(config)
-    elif args.action == 'backup':
-        backup_prod(config, filename)
-    elif args.action == 'download':
-        download_backup(config, filename)
-    elif args.action == 'upload':
-        upload_backup(config, filename)
-    elif args.action == 'restore':
-        restore_staging(config, filename, clean=args.clean)
-    elif args.action == 'backup_staging':
-        backup_staging(config, filename)
-    elif args.action == 'download_staging':
-        download_staging(config, filename)
-    elif args.action == 'full':
-        print(f"Starting FULL pipeline with filename: {filename}")
-        backup_prod(config, filename)
-        download_backup(config, filename)
-        upload_backup(config, filename)
-        restore_staging(config, filename, clean=args.clean) # Pass clean flag to full as well
+    # Prepare environment for psql
+    env = os.environ.copy()
+    if 'db_password' in local_conf and local_conf['db_password']:
+        env['PGPASSWORD'] = local_conf['db_password']
+    
+    # Base connection args
+    auth_args = [
+        '-U', local_conf['db_user'],
+        '-h', local_conf['host'],
+        '-p', str(local_conf.get('port', 5432)),
+        '-d', local_conf['db_name']
+    ]
+
+    # Clean DB if requested
+    if clean:
+        print("  [CLEAN] Dropping & Recreating 'public' schema locally...")
+        try:
+            # 1. Terminate connections
+            kill_sql = f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{local_conf['db_name']}' AND pid <> pg_backend_pid();"
+            subprocess.run(['psql'] + auth_args + ['-c', kill_sql], env=env, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # 2. Drop & Create Schema
+            reset_sql = "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+            subprocess.run(['psql'] + auth_args + ['-c', reset_sql], env=env, check=True)
+            print("  [CLEAN] Schema reset successful.")
+        except subprocess.CalledProcessError as e:
+            print(f"  [CLEAN] Warning: Failed to reset schema: {e}")
+            print("  Continuing with restore...")
+
+    print(f"Restoring {backup_path} to local db {local_conf['db_name']}...")
+    
+    try:
+        # Use gzip module to decompress stream to psql stdin
+        with gzip.open(backup_path, 'rb') as f_in:
+            with subprocess.Popen(['psql'] + auth_args, stdin=subprocess.PIPE, env=env) as p:
+                shutil.copyfileobj(f_in, p.stdin)
+                p.stdin.close() # Signal EOF
+                p.wait()
+                
+                if p.returncode == 0:
+                    print("Restore successful.")
+                else:
+                    print(f"Restore failed with exit code {p.returncode}")
+                    sys.exit(1)
+
+    except Exception as e:
+        print(f"Restore failed: {e}")
+        sys.exit(1)
+
+
 
 def test_connections(config):
     print("--- Testing Connections ---")
@@ -377,7 +404,7 @@ def find_latest_remote_staging_backup(config, base_filename):
 
 def main():
     parser = argparse.ArgumentParser(description="Database Backup & Restore Tool")
-    parser.add_argument('action', choices=['backup', 'download', 'upload', 'restore', 'full', 'test', 'backup_staging', 'download_staging'], 
+    parser.add_argument('action', choices=['backup', 'download', 'upload', 'restore', 'full', 'test', 'backup_staging', 'download_staging', 'restore_local'], 
                         help="Action to perform")
     parser.add_argument('--config', default='config.yaml', help="Path to config file")
     parser.add_argument('--file', help="Specific filename to use. Optional.")
@@ -435,6 +462,17 @@ def main():
                 print(f"Error: Could not find any existing backup files matching '{base_name}' in {config['local']['backup_dir']}")
                 print("Please run 'backup' first or specify a file with --file")
                 sys.exit(1)
+        elif args.action == 'restore_local':
+             # Restore local also looks for latest local backup
+             print(f"No --file specified. Looking for latest backup in {config['local']['backup_dir']}...")
+             latest = find_latest_backup(config['local']['backup_dir'], base_name)
+             if latest:
+                filename = latest
+                print(f"Found latest local backup: {filename}")
+             else:
+                print(f"Error: Could not find any existing backup files matching '{base_name}' in {config['local']['backup_dir']}")
+                sys.exit(1)
+
         elif args.action == 'test':
              pass
 
@@ -452,6 +490,8 @@ def main():
         backup_staging(config, filename)
     elif args.action == 'download_staging':
         download_staging(config, filename)
+    elif args.action == 'restore_local':
+        restore_local(config, filename, clean=args.clean)
     elif args.action == 'full':
         print(f"Starting FULL pipeline with filename: {filename}")
         backup_prod(config, filename)

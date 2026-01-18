@@ -10,6 +10,7 @@ A Python-based utility to automate the process of migrating a PostgreSQL databas
 - **Staging Backup**: Supports backing up the existing Staging database before replacement.
 - **Safety**: Timestamped filenames prevent overwrites.
 - **Clean Restore**: disconnects active users and resets schema to avoid conflicts.
+- **Restore Local**: Restore a backup directly to your local PostgreSQL database (Windows/Non-Docker supported).
 
 ## Prerequisites
 1. **Python 3.6+**
@@ -90,6 +91,23 @@ python backup_restore.py upload --file old_backup_2025.sql.gz
 python backup_restore.py restore --file old_backup_2025.sql.gz --clean
 ```
 
+
+### 4. Restore to Local Machine (No Docker)
+If you want to pull data from Production to your local development machine (Windows).
+Ensure you have `psql` installed and `config.yaml` configured with local DB credentials.
+
+```powershell
+# 1. Backup Prod
+python backup_restore.py backup
+
+# 2. Download to Local
+python backup_restore.py download
+
+# 3. Restore to Local DB
+# Use --clean to reset local schema 'public' before restoring
+python backup_restore.py restore_local --clean
+```
+
 ## Command Reference
 
 | Action | Description | Options |
@@ -99,6 +117,7 @@ python backup_restore.py restore --file old_backup_2025.sql.gz --clean
 | `download`| SCP latest backup from Prod to Local | `--file` |
 | `upload` | SCP latest backup from Local to Staging | `--file` |
 | `restore` | Restore DB on Staging | `--file`, `--clean` |
+| `restore_local`| Restore DB on Local Machine (Non-Docker) | `--file`, `--clean` |
 | `backup_staging` | Dump Staging DB to file on Staging server | |
 | `download_staging`| SCP latest backup from Staging to Local | `--file` |
 | `test` | Test SSH and DB connections to both servers | |
