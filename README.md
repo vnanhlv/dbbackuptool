@@ -20,7 +20,7 @@ A Python-based utility to automate the process of migrating a PostgreSQL databas
 3. **SSH Access**: You must have SSH keys configured for both Production and Staging servers.
 
 ## Configuration
-Edit `config.yaml` with your server details:
+Rename `config.yaml.example` to  `config.yaml` and edit with your server details:
 - **Keys**: Use `/` for paths (e.g., `D:/path/to/key`).
 - **Passphrase**: Add `ssh_passphrase: "your_pass"` if your SSH key has a password.
 - **Database**: Ensure `db_user`, `db_name`, and `db_password` are correct.
