@@ -1,0 +1,4 @@
+dumps/
+config.yaml
+__pycache__/
+*.pyc
