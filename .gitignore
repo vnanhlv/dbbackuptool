@@ -2,3 +2,5 @@ dumps/
 config.yaml
 __pycache__/
 *.pyc
+docs
+logtool/logs

@@ -1,0 +1,35 @@
+# Remote Server Connection
+# This tool uses SSH to access and download logs
+server:
+  host: "your_server_ip"
+  user: "your_username"
+  port: 22
+  ssh_key_path: "/path/to/private/key"
+  # Optional: only if your key has a passphrase
+  # ssh_passphrase: "your_passphrase"
+
+logs:
+  # Directory on the remote server where logs are stored
+  remote_path: "/www/var/chatbot/backend/logs"
+  
+  # Local directory to save downloaded logs
+  # The script will create subfolders for each day/run if needed, or flat structure.
+  # Let's keep it flat for now based on request.
+  local_path: "logs"
+  
+  # File patterns to target
+  # We want to download anything ending in .1.log, .2.log, etc.
+  # And ignore the active .log file.
+  import_patterns:
+    - "*.log.1"
+    - "*.log.2"
+    - "*.log.3"
+    - "*.log.4"
+    - "*.log.5"
+    # Add more if needed, or the script can use regex for *.[0-9]+.log
+
+settings:
+  # Action after download: 'delete' or 'keep'
+  # Based on user request: "Chỉ giữ lại .log" implies deleting rotated logs from server.
+  # WARNING: Setting this to 'delete' will remove files from the server!
+  after_download: "delete"

@@ -9,10 +9,20 @@ import shutil
 from fabric import Connection
 from invoke import UnexpectedExit
 
-def load_config(config_path='config.yaml'):
+def load_config(config_path=None):
+    if config_path is None:
+        # Default to config.yaml in the same directory as the script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        config_path = os.path.join(script_dir, 'config.yaml')
+
     if not os.path.exists(config_path):
-        print(f"Error: Config file '{config_path}' not found.")
-        sys.exit(1)
+        # Fallback to check CWD just in case
+        if os.path.exists('config.yaml'):
+            config_path = 'config.yaml'
+        else:
+            print(f"Error: Config file '{config_path}' not found.")
+            sys.exit(1)
+            
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
