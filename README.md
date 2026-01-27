@@ -108,6 +108,20 @@ python backup_restore.py download
 python backup_restore.py restore_local --clean
 ```
 
+### 5. Restore to Production (Danger Zone)
+**WARNING**: This will overwrite your PRODUCTION database. Use with extreme caution.
+
+1. **Verify your local backup**: Ensure the file you want to restore is in your local `config['local']['backup_dir']`.
+2. **Upload to Production**:
+   ```powershell
+   python backup_restore.py upload_prod --file old_backup_2025.sql.gz
+   ```
+3. **Restore on Production**:
+   ```powershell
+   # --clean ensures clean state by dropping schema 'public'
+   python backup_restore.py restore_prod --file old_backup_2025.sql.gz --clean
+   ```
+
 ## Command Reference
 
 | Action | Description | Options |
@@ -116,7 +130,9 @@ python backup_restore.py restore_local --clean
 | `backup` | Dump Prod DB to file on Prod server | |
 | `download`| SCP latest backup from Prod to Local | `--file` |
 | `upload` | SCP latest backup from Local to Staging | `--file` |
+| `upload_prod` | SCP backup from Local to Production /tmp | `--file` |
 | `restore` | Restore DB on Staging | `--file`, `--clean` |
+| `restore_prod`| Restore DB on Production | `--file`, `--clean` |
 | `restore_local`| Restore DB on Local Machine (Non-Docker) | `--file`, `--clean` |
 | `backup_staging` | Dump Staging DB to file on Staging server | |
 | `download_staging`| SCP latest backup from Staging to Local | `--file` |

@@ -170,6 +170,83 @@ def download_staging(config, filename):
     finally:
         conn.close()
 
+def upload_prod(config, filename):
+    # Vietnamese comment: Tải file backup từ máy local lên server Production (vào thư mục /tmp)
+    print(f"--- [STEP 3] Uploading Backup to Production (File: {filename}) ---")
+    prod_conf = config['production']
+    local_conf = config['local']
+    
+    local_path = os.path.join(local_conf['backup_dir'], filename)
+    if not os.path.exists(local_path):
+        print(f"Error: Local backup file not found at {local_path}")
+        sys.exit(1)
+    
+    remote_path = f"/tmp/{filename}"
+        
+    conn = get_connection(prod_conf)
+    
+    print(f"Uploading {local_path} to {remote_path}...")
+    try:
+        sftp = conn.sftp()
+        sftp.put(local_path, remote_path, callback=upload_progress)
+        print("\nUpload successful.")
+    except Exception as e:
+        print(f"\nUpload failed: {e}")
+        sys.exit(1)
+    finally:
+        conn.close()
+
+def restore_prod(config, filename, clean=False):
+    # Vietnamese comment: Khôi phục database trên server Production từ file backup trong /tmp
+    prod_conf = config['production']
+    conn = get_connection(prod_conf)
+    remote_path = f"/tmp/{filename}"
+    print(f"--- [STEP 4] Restoring Production Database (File: {filename}) ---")
+    
+    env_vars = ""
+    if 'db_password' in prod_conf and prod_conf['db_password']:
+        env_vars = f"-e PGPASSWORD='{prod_conf['db_password']}' "
+    
+    # Clean DB if requested
+    if clean:
+        print("  [CLEAN] Dropping & Recreating 'public' schema to ensure a clean restore...")
+        # 1. Terminate connections
+        kill_cmd = (
+            f"docker exec {env_vars}{prod_conf['docker_container']} "
+            f"psql -U {prod_conf['db_user']} -d {prod_conf['db_name']} "
+            f"-c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{prod_conf['db_name']}' AND pid <> pg_backend_pid();\""
+        )
+        # 2. Drop & Create Schema
+        reset_schema_cmd = (
+            f"docker exec {env_vars}{prod_conf['docker_container']} "
+            f"psql -U {prod_conf['db_user']} -d {prod_conf['db_name']} "
+            f"-c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public;\""
+        )
+        
+        try:
+            conn.run(kill_cmd, hide=True, warn=True) # warn=True because it might fail if we kill ourself or no perms, but worth trying
+            conn.run(reset_schema_cmd)
+            print("  [CLEAN] Schema reset successful.")
+        except Exception as e:
+            print(f"  [CLEAN] Warning: Failed to reset schema: {e}")
+            print("  Continuing with restore (might fail if conflicts exist)...")
+    
+    restore_cmd = (
+        f"gunzip -c {remote_path} | "
+        f"docker exec -i {env_vars}{prod_conf['docker_container']} "
+        f"psql -U {prod_conf['db_user']} -d {prod_conf['db_name']}"
+    )
+    
+    print(f"Executing restore on production... (This might take a while)")
+    try:
+        conn.run(restore_cmd)
+        print("Restore successful.")
+    except UnexpectedExit as e:
+        print(f"Restore failed: {e}")
+        sys.exit(1)
+    finally:
+        conn.close()
+
 def restore_staging(config, filename, clean=False):
     staging_conf = config['staging']
     conn = get_connection(staging_conf)
@@ -404,7 +481,7 @@ def find_latest_remote_staging_backup(config, base_filename):
 
 def main():
     parser = argparse.ArgumentParser(description="Database Backup & Restore Tool")
-    parser.add_argument('action', choices=['backup', 'download', 'upload', 'restore', 'full', 'test', 'backup_staging', 'download_staging', 'restore_local'], 
+    parser.add_argument('action', choices=['backup', 'download', 'upload', 'restore', 'full', 'test', 'backup_staging', 'download_staging', 'restore_local', 'upload_prod', 'restore_prod'], 
                         help="Action to perform")
     parser.add_argument('--config', default='config.yaml', help="Path to config file")
     parser.add_argument('--file', help="Specific filename to use. Optional.")
@@ -451,7 +528,7 @@ def main():
                  print(f"Error: Could not find any backup files matching 'staging_{base_name}' on Remote Staging /tmp/")
                  sys.exit(1)
              
-        elif args.action in ['upload', 'restore']:
+        elif args.action in ['upload', 'restore', 'upload_prod', 'restore_prod']:
             # Seek the LATEST file for operations on existing data (LOCALLY)
             print(f"No --file specified. Looking for latest backup in {config['local']['backup_dir']}...")
             latest = find_latest_backup(config['local']['backup_dir'], base_name)
@@ -492,6 +569,10 @@ def main():
         download_staging(config, filename)
     elif args.action == 'restore_local':
         restore_local(config, filename, clean=args.clean)
+    elif args.action == 'upload_prod':
+        upload_prod(config, filename)
+    elif args.action == 'restore_prod':
+        restore_prod(config, filename, clean=args.clean)
     elif args.action == 'full':
         print(f"Starting FULL pipeline with filename: {filename}")
         backup_prod(config, filename)
