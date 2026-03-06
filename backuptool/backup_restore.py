@@ -41,6 +41,54 @@ def get_connection(server_config):
         connect_kwargs=connect_kwargs
     )
 
+
+def _db_prefix(conf, interactive: bool = False) -> str:
+    """Return a command prefix for running Postgres tools on the remote host.
+
+    The helper handles two modes:
+    1. **containerized** - when ``docker_container`` is provided in the
+       configuration.  The prefix will invoke ``docker exec`` (adding ``-i``
+       when ``interactive`` is True) and, if a password is configured, pass
+       it via ``-e PGPASSWORD=...`` inside the container.
+
+    2. **non-container** - when no ``docker_container`` key exists or it is
+       empty.  In that case the prefix is simply the ``PGPASSWORD`` environment
+       variable (if any) which will be prepended before the actual command.
+
+    The returned string always ends with a space so callers can append the
+    actual ``pg_dump``/``psql`` invocation directly.
+    """
+    docker = conf.get('docker_container')
+    if docker:
+        env = ""
+        if 'db_password' in conf and conf['db_password']:
+            env = f"-e PGPASSWORD='{conf['db_password']}' "
+        # docker exec prefix; include -i nếu cần pipe data vào container
+        # env (-e PGPASSWORD) phải đặt SAU "docker exec" và các flag của nó
+        prefix = f"docker exec {'-i ' if interactive else ''}{env}{docker} "
+        return prefix
+    else:
+        env = ""
+        if 'db_password' in conf and conf['db_password']:
+            env = f"PGPASSWORD='{conf['db_password']}' "
+        return env
+
+def _db_host_arg(conf) -> str:
+    """Trả về flag -h host để buộc psql/pg_dump kết nối qua TCP thay vì Unix socket.
+
+    Khi không dùng Docker, PostgreSQL mặc định kết nối qua Unix socket và dùng
+    peer authentication (check OS user). Thêm -h để dùng TCP thì mới xác thực
+    bằng password được.
+    Khi dùng Docker thì không cần vì kết nối xảy ra bên trong container.
+    """
+    # Docker tự handle kết nối bên trong container
+    if conf.get('docker_container'):
+        return ""
+    # Lấy db_host từ config, mặc định 127.0.0.1 để dùng TCP
+    host = conf.get('db_host', '127.0.0.1')
+    port = conf.get('db_port', 5432)
+    return f"-h {host} -p {port} "
+
 def get_timestamped_filename(base_filename):
     """Appends a timestamp to the filename before the extensions."""
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -57,13 +105,10 @@ def backup_prod(config, filename):
     
     remote_path = f"/tmp/{filename}"
     
-    env_vars = ""
-    if 'db_password' in prod_conf and prod_conf['db_password']:
-        env_vars = f"-e PGPASSWORD='{prod_conf['db_password']}' "
-    
+    # build command prefix that may or may not use a docker container
+    prefix = _db_prefix(prod_conf)
     dump_cmd = (
-        f"docker exec {env_vars}{prod_conf['docker_container']} "
-        f"pg_dump -U {prod_conf['db_user']} {prod_conf['db_name']} "
+        f"{prefix}pg_dump {_db_host_arg(prod_conf)}-U {prod_conf['db_user']} {prod_conf['db_name']} "
         f"| gzip > {remote_path}"
     )
     
@@ -115,7 +160,7 @@ def upload_backup(config, filename):
         print(f"Error: Local backup file not found at {local_path}")
         sys.exit(1)
     
-    remote_path = f"/tmp/{filename}"
+    remote_path = f"/home/anderson/{filename}"
         
     conn = get_connection(staging_conf)
     
@@ -137,16 +182,12 @@ def backup_staging(config, filename):
     
     remote_path = f"/tmp/{filename}"
     
-    env_vars = ""
-    if 'db_password' in staging_conf and staging_conf['db_password']:
-        env_vars = f"-e PGPASSWORD='{staging_conf['db_password']}' "
-    
+    prefix = _db_prefix(staging_conf)
     dump_cmd = (
-        f"docker exec {env_vars}{staging_conf['docker_container']} "
-        f"pg_dump -U {staging_conf['db_user']} {staging_conf['db_name']} "
+        f"{prefix}pg_dump {_db_host_arg(staging_conf)}-U {staging_conf['db_user']} {staging_conf['db_name']} "
         f"| gzip > {remote_path}"
     )
-    
+
     print(f"Executing: {dump_cmd}")
     try:
         conn.run(dump_cmd)
@@ -213,24 +254,21 @@ def restore_prod(config, filename, clean=False):
     remote_path = f"/tmp/{filename}"
     print(f"--- [STEP 4] Restoring Production Database (File: {filename}) ---")
     
-    env_vars = ""
-    if 'db_password' in prod_conf and prod_conf['db_password']:
-        env_vars = f"-e PGPASSWORD='{prod_conf['db_password']}' "
+    # Build prefix for commands; may or may not include docker exec
+    prefix = _db_prefix(prod_conf)
     
     # Clean DB if requested
     if clean:
         print("  [CLEAN] Dropping & Recreating 'public' schema to ensure a clean restore...")
         # 1. Terminate connections
         kill_cmd = (
-            f"docker exec {env_vars}{prod_conf['docker_container']} "
-            f"psql -U {prod_conf['db_user']} -d {prod_conf['db_name']} "
+            f"{prefix}psql {_db_host_arg(prod_conf)}-U {prod_conf['db_user']} -d {prod_conf['db_name']} "
             f"-c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{prod_conf['db_name']}' AND pid <> pg_backend_pid();\""
         )
         # 2. Drop & Create Schema
         reset_schema_cmd = (
-            f"docker exec {env_vars}{prod_conf['docker_container']} "
-            f"psql -U {prod_conf['db_user']} -d {prod_conf['db_name']} "
-            f"-c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public;\""
+            f"{prefix}psql {_db_host_arg(prod_conf)}-U {prod_conf['db_user']} -d {prod_conf['db_name']} "
+            f"-c \"DROP OWNED BY {prod_conf['db_user']} CASCADE;\""
         )
         
         try:
@@ -243,8 +281,7 @@ def restore_prod(config, filename, clean=False):
     
     restore_cmd = (
         f"gunzip -c {remote_path} | "
-        f"docker exec -i {env_vars}{prod_conf['docker_container']} "
-        f"psql -U {prod_conf['db_user']} -d {prod_conf['db_name']}"
+        f"{_db_prefix(prod_conf, interactive=True)}psql {_db_host_arg(prod_conf)}-U {prod_conf['db_user']} -d {prod_conf['db_name']}"
     )
     
     print(f"Executing restore on production... (This might take a while)")
@@ -260,27 +297,23 @@ def restore_prod(config, filename, clean=False):
 def restore_staging(config, filename, clean=False):
     staging_conf = config['staging']
     conn = get_connection(staging_conf)
-    remote_path = f"/tmp/{filename}"
+    remote_path = f"/home/anderson/{filename}"
     print(f"--- [STEP 4] Restoring Staging Database (File: {filename}) ---")
     
-    env_vars = ""
-    if 'db_password' in staging_conf and staging_conf['db_password']:
-        env_vars = f"-e PGPASSWORD='{staging_conf['db_password']}' "
+    prefix = _db_prefix(staging_conf)
     
     # Clean DB if requested
     if clean:
         print("  [CLEAN] Dropping & Recreating 'public' schema to ensure a clean restore...")
         # 1. Terminate connections
         kill_cmd = (
-            f"docker exec {env_vars}{staging_conf['docker_container']} "
-            f"psql -U {staging_conf['db_user']} -d {staging_conf['db_name']} "
+            f"{prefix}psql {_db_host_arg(staging_conf)}-U {staging_conf['db_user']} -d {staging_conf['db_name']} "
             f"-c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{staging_conf['db_name']}' AND pid <> pg_backend_pid();\""
         )
         # 2. Drop & Create Schema
         reset_schema_cmd = (
-            f"docker exec {env_vars}{staging_conf['docker_container']} "
-            f"psql -U {staging_conf['db_user']} -d {staging_conf['db_name']} "
-            f"-c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public;\""
+            f"{prefix}psql {_db_host_arg(staging_conf)}-U {staging_conf['db_user']} -d {staging_conf['db_name']} "
+            f"-c \"DROP OWNED BY {staging_conf['db_user']} CASCADE;\""
         )
         
         try:
@@ -293,8 +326,7 @@ def restore_staging(config, filename, clean=False):
 
     restore_cmd = (
         f"gunzip -c {remote_path} | "
-        f"docker exec -i {env_vars}{staging_conf['docker_container']} "
-        f"psql -U {staging_conf['db_user']} -d {staging_conf['db_name']}"
+        f"{_db_prefix(staging_conf, interactive=True)}psql {_db_host_arg(staging_conf)}-U {staging_conf['db_user']} -d {staging_conf['db_name']}"
     )
     
     print(f"Executing restore on staging... (This might take a while)")
@@ -338,7 +370,7 @@ def restore_local(config, filename, clean=False):
             subprocess.run(['psql'] + auth_args + ['-c', kill_sql], env=env, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             # 2. Drop & Create Schema
-            reset_sql = "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+            reset_sql = f"DROP OWNED BY {local_conf['db_user']} CASCADE;"
             subprocess.run(['psql'] + auth_args + ['-c', reset_sql], env=env, check=True)
             print("  [CLEAN] Schema reset successful.")
         except subprocess.CalledProcessError as e:
@@ -380,7 +412,7 @@ def test_connections(config):
         # Test DB
         print(f"  [DB] Testing PostgreSQL connection...")
         prod_conf = config['production']
-        db_check_cmd = f"docker exec {prod_conf['docker_container']} psql -U {prod_conf['db_user']} -d {prod_conf['db_name']} -c \"SELECT 1;\""
+        db_check_cmd = f"{_db_prefix(prod_conf)}psql {_db_host_arg(prod_conf)}-U {prod_conf['db_user']} -d {prod_conf['db_name']} -c \"SELECT 1;\""
         prod_conn.run(db_check_cmd, hide=True)
         print(f"  [DB] OK! Database '{prod_conf['db_name']}' is accessible.")
         
@@ -398,7 +430,7 @@ def test_connections(config):
         # Test DB
         print(f"  [DB] Testing PostgreSQL connection...")
         staging_conf = config['staging']
-        db_check_cmd = f"docker exec {staging_conf['docker_container']} psql -U {staging_conf['db_user']} -d {staging_conf['db_name']} -c \"SELECT 1;\""
+        db_check_cmd = f"{_db_prefix(staging_conf)}psql {_db_host_arg(staging_conf)}-U {staging_conf['db_user']} -d {staging_conf['db_name']} -c \"SELECT 1;\""
         staging_conn.run(db_check_cmd, hide=True)
         print(f"  [DB] OK! Database '{staging_conf['db_name']}' is accessible.")
         

@@ -3,10 +3,10 @@
 A Python-based utility to automate the process of migrating a PostgreSQL database from a Production Docker container to a Staging Docker container. It supports a full automated pipeline or individual step-by-step execution.
 
 ## Features
-- **Backup Production**: Dumps the database from the Production Docker container.
+- **Backup Production**: Dumps the database from the Production server. Docker is optional – if your database runs in a container just provide a container name, otherwise the script will call `pg_dump` directly on the host.
 - **Download**: Transfers the backup file from Production to your Local machine.
 - **Upload**: Transfers the backup file from Local to the Staging server.
-- **Restore Staging**: Restores the database on the Staging Docker container (with optional schema cleanup).
+- **Restore Staging**: Restores the database on the Staging server (containerised or not) with optional schema cleanup.
 - **Staging Backup**: Supports backing up the existing Staging database before replacement.
 - **Safety**: Timestamped filenames prevent overwrites.
 - **Clean Restore**: disconnects active users and resets schema to avoid conflicts.
@@ -19,12 +19,13 @@ A Python-based utility to automate the process of migrating a PostgreSQL databas
    pip install -r requirements.txt
    ```
 3. **SSH Access**: You must have SSH keys configured for both Production and Staging servers.
-
+> **Note**: the tool works equally well whether the remote PostgreSQL instance is running in a Docker container or installed directly on the host.  See configuration section for details.
 ## Configuration
 Rename `config.yaml.example` to  `config.yaml` and edit with your server details:
 - **Keys**: Use `/` for paths (e.g., `D:/path/to/key`).
 - **Passphrase**: Add `ssh_passphrase: "your_pass"` if your SSH key has a password.
 - **Database**: Ensure `db_user`, `db_name`, and `db_password` are correct.
+  - If you are using Docker, also set `docker_container` to the container name. Omit the key for a non-containerized database (the script will automatically adjust commands accordingly).
 
 ## Quick Start (Full Pipeline)
 To backup Production, download, upload, and restore to Staging in one go:

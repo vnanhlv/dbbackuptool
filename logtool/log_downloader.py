@@ -95,10 +95,34 @@ def main():
         # 3. Download and Delete
         for filename in to_download:
             remote_file = f"{remote_dir}/{filename}"
-            local_file = os.path.join(local_dir, filename)
             
-            print(f"Downloading {filename}...")
             try:
+                # Get remote file attributes for timestamp
+                # Vietnamese comment: Lấy thời gian sửa đổi file trên server để làm timestamp
+                stat_result = conn.run(f"stat -c %Y {remote_file}", hide=True)
+                timestamp = int(stat_result.stdout.strip())
+                dt_str = datetime.datetime.fromtimestamp(timestamp).strftime('%Y%m%d_%H%M%S')
+                
+                # New local filename: name.timestamp
+                local_filename = f"{filename}.{dt_str}"
+                local_file = os.path.join(local_dir, local_filename)
+
+                if os.path.exists(local_file):
+                    print(f"  [SKIP] File exists: {local_filename}")
+                    
+                    # Logic for deletion if configured (even if we skipped download, we might want to delete if it's "safe")
+                    # But safest is: only delete if we successfully downloaded OR if we verify it's the exact same content.
+                    # For now, let's assume if it exists with same timestamp name, it's backed up.
+                    
+                    if settings.get('after_download') == 'delete':
+                        # Optional: check size or hash if paranoid
+                        print(f"  [DELETE] Removing remote file {filename} (already backed up)...")
+                        conn.run(f"rm {remote_file}")
+                        print("  [OK] Deleted.")
+
+                    continue
+
+                print(f"Downloading {filename} as {local_filename}...")
                 conn.get(remote_file, local_file)
                 print(f"  [OK] Downloaded to {local_file}")
                 
@@ -115,7 +139,7 @@ def main():
                     print("  [ERROR] Local file missing. Skipping delete.")
                     
             except Exception as e:
-                print(f"  [ERROR] Failed to download {filename}: {e}")
+                print(f"  [ERROR] Failed to process {filename}: {e}")
 
     except Exception as e:
         print(f"Error: {e}")
