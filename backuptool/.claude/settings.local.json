@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source venv/Scripts/activate && python backup_restore.py full --clean --config config_erp.yaml)",
+      "Bash(cd \"D:/Coding/tool/backuptool/backuptool\" && source venv/Scripts/activate && python backup_restore.py full --clean --config config_erp.yaml)"
+    ]
+  }
+}

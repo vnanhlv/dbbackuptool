@@ -125,19 +125,37 @@ python backup_restore.py restore_local --clean
 
 ## Command Reference
 
+> **Global flag**: `--config <file>` — chỉ định file config (mặc định: `config.yaml`). Áp dụng cho mọi action.
+
 | Action | Description | Options |
 |--------|-------------|---------|
-| `full` | Run all steps: Backup Prod -> DL -> UL -> Restore Staging | `--clean` |
-| `backup` | Dump Prod DB to file on Prod server | |
-| `download`| SCP latest backup from Prod to Local | `--file` |
-| `upload` | SCP latest backup from Local to Staging | `--file` |
-| `upload_prod` | SCP backup from Local to Production /tmp | `--file` |
-| `restore` | Restore DB on Staging | `--file`, `--clean` |
-| `restore_prod`| Restore DB on Production | `--file`, `--clean` |
-| `restore_local`| Restore DB on Local Machine (Non-Docker) | `--file`, `--clean` |
-| `backup_staging` | Dump Staging DB to file on Staging server | |
-| `download_staging`| SCP latest backup from Staging to Local | `--file` |
-| `test` | Test SSH and DB connections to both servers | |
+| `full` | Run all steps: Backup Prod -> DL -> UL -> Restore Staging | `--clean`, `--config` |
+| `backup` | Dump Prod DB to file on Prod server | `--config` |
+| `download`| SCP latest backup from Prod to Local | `--file`, `--config` |
+| `upload` | SCP latest backup from Local to Staging | `--file`, `--config` |
+| `upload_prod` | SCP backup from Local to Production /tmp | `--file`, `--config` |
+| `restore` | Restore DB on Staging | `--file`, `--clean`, `--config` |
+| `restore_prod`| Restore DB on Production | `--file`, `--clean`, `--config` |
+| `restore_local`| Restore DB on Local Machine (Non-Docker) | `--file`, `--clean`, `--config` |
+| `backup_staging` | Dump Staging DB to file on Staging server | `--config` |
+| `download_staging`| SCP latest backup from Staging to Local | `--file`, `--config` |
+| `test` | Test SSH and DB connections to both servers | `--config` |
+
+### 6. Sử Dụng Nhiều File Config (Multi-Project)
+Nếu bạn quản lý nhiều project (ví dụ: ERP, Tích Xêng, Staging riêng), tạo file config riêng cho từng project và chỉ định bằng flag `--config`:
+
+```powershell
+# Backup project ERP
+python backup_restore.py backup --config config_erp.yaml
+
+# Full pipeline cho Tích Xêng
+python backup_restore.py full --clean --config config_tichxeng.yaml
+
+# Test connection cho staging riêng
+python backup_restore.py test --config config_staging.yaml
+```
+
+> **Lưu ý**: Flag `--config` áp dụng cho mọi action. Nếu không truyền, mặc định dùng `config.yaml`.
 
 ## Troubleshooting
 - **Authentication failed**: Check `ssh_key_path` and `ssh_passphrase` in `config.yaml`.

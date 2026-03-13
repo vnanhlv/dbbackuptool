@@ -1,0 +1,40 @@
+production:
+  host: "180.93.1.251"
+  port: 50999
+  user: "anderson"
+  ssh_key_path: "D:/Work3/Other computers/LynnPC/Works/Trung/key SSH/tapaz"
+  ssh_passphrase: "123" # <--- Thêm dòng này
+  docker_container: "erp_db"
+  db_user: "tapo"
+  db_name: "tap"
+  db_password: "tapo"
+  # Optional: set a temp path on the remote server
+  #remote_temp_path: "/tmp/erp_backup_prod.sql.gz"
+
+staging:
+  host: "staging"
+  port: 22
+  user: "anderson"
+  ssh_key_path: "D:/Work3/Other computers/LynnPC/Works/Trung/key SSH/andersonVA1"
+  ssh_passphrase: "123" # <--- Thêm dòng này
+  docker_container: ""
+  db_name: "tap"
+  db_user: "tapo"
+  db_password: "tapo"
+  # Optional: set a temp path on the remote server
+  remote_temp_path: "/tmp/erp_backup_staging.sql.gz"
+
+local:
+  # Where to store the downloaded backup
+  backup_dir: "d:/Coding/tool/backuptool/dumps/db/erp"
+  # Filename for the local backup
+  backup_filename: "prod_erp_backup.sql.gz"
+
+
+
+  # Local DB Connection for restore_local
+  host: "localhost"
+  port: 5432
+  db_user: "botcake" # Update if different
+  db_name: "erp" # Update if different
+  db_password: "botcake" # Update if different

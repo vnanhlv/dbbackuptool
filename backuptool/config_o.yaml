@@ -1,0 +1,40 @@
+production:
+  host: "128.199.109.183"
+  port: 34988
+  user: "anderson"
+  ssh_key_path: "D:/Work3/Other computers/LynnPC/Works/Trung/key SSH/andersontapo"
+  ssh_passphrase: "123" # <--- Thêm dòng này
+  docker_container: "cb-db"
+  db_user: "chatbot"
+  db_name: "chatbot"
+  db_password: "chatbot"
+  # Optional: set a temp path on the remote server
+  #remote_temp_path: "/tmp/chatbot_backup_prod.sql.gz"
+
+staging:
+  host: "staging"
+  port: 22
+  user: "anderson"
+  ssh_key_path: "D:/Work3/Other computers/LynnPC/Works/Trung/key SSH/andersonVA1"
+  ssh_passphrase: "123" # <--- Thêm dòng này
+  docker_container: ""
+  db_user: "botcake"
+  db_name: "chatbot"
+  db_password: "botcake"
+  # Optional: set a temp path on the remote server
+  remote_temp_path: "/tmp/chatbot_backup_staging.sql.gz"
+
+local:
+  # Where to store the downloaded backup
+  backup_dir: "d:/Coding/tool/backuptool/dumps"
+  # Filename for the local backup
+  backup_filename: "prod_chatbot_backup.sql.gz"
+
+
+
+  # Local DB Connection for restore_local
+  host: "localhost"
+  port: 5432
+  db_user: "botcake" # Update if different
+  db_name: "chatbot" # Update if different
+  db_password: "botcake" # Update if different

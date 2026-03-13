@@ -10,13 +10,21 @@ from fabric import Connection
 from invoke import UnexpectedExit
 
 def load_config(config_path=None):
+    # Nếu user chỉ định rõ file config, dùng trực tiếp — không fallback
+    if config_path is not None and config_path != 'config.yaml':
+        if not os.path.exists(config_path):
+            print(f"Error: Config file '{config_path}' not found.")
+            sys.exit(1)
+        with open(config_path, 'r') as f:
+            return yaml.safe_load(f)
+
     if config_path is None:
-        # Default to config.yaml in the same directory as the script
+        # Mặc định dùng config.yaml cùng thư mục với script
         script_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(script_dir, 'config.yaml')
 
     if not os.path.exists(config_path):
-        # Fallback to check CWD just in case
+        # Fallback kiểm tra CWD phòng trường hợp chạy từ thư mục khác
         if os.path.exists('config.yaml'):
             config_path = 'config.yaml'
         else:
@@ -265,12 +273,15 @@ def restore_prod(config, filename, clean=False):
             f"{prefix}psql {_db_host_arg(prod_conf)}-U {prod_conf['db_user']} -d {prod_conf['db_name']} "
             f"-c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{prod_conf['db_name']}' AND pid <> pg_backend_pid();\""
         )
-        # 2. Drop & Create Schema
+        # 2. Drop & recreate toàn bộ schema public — đáng tin cậy hơn DROP OWNED BY
+        #    vì DROP SCHEMA xóa tất cả objects bất kể owner là ai
         reset_schema_cmd = (
             f"{prefix}psql {_db_host_arg(prod_conf)}-U {prod_conf['db_user']} -d {prod_conf['db_name']} "
-            f"-c \"DROP OWNED BY {prod_conf['db_user']} CASCADE;\""
+            f"-c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public; "
+            f"GRANT ALL ON SCHEMA public TO {prod_conf['db_user']}; "
+            f"GRANT ALL ON SCHEMA public TO public;\""
         )
-        
+
         try:
             conn.run(kill_cmd, hide=True, warn=True) # warn=True because it might fail if we kill ourself or no perms, but worth trying
             conn.run(reset_schema_cmd)
@@ -310,12 +321,15 @@ def restore_staging(config, filename, clean=False):
             f"{prefix}psql {_db_host_arg(staging_conf)}-U {staging_conf['db_user']} -d {staging_conf['db_name']} "
             f"-c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{staging_conf['db_name']}' AND pid <> pg_backend_pid();\""
         )
-        # 2. Drop & Create Schema
+        # 2. Drop & recreate toàn bộ schema public — đáng tin cậy hơn DROP OWNED BY
+        #    vì DROP SCHEMA xóa tất cả objects bất kể owner là ai
         reset_schema_cmd = (
             f"{prefix}psql {_db_host_arg(staging_conf)}-U {staging_conf['db_user']} -d {staging_conf['db_name']} "
-            f"-c \"DROP OWNED BY {staging_conf['db_user']} CASCADE;\""
+            f"-c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public; "
+            f"GRANT ALL ON SCHEMA public TO {staging_conf['db_user']}; "
+            f"GRANT ALL ON SCHEMA public TO public;\""
         )
-        
+
         try:
             conn.run(kill_cmd, hide=True, warn=True) # warn=True because it might fail if we kill ourself or no perms, but worth trying
             conn.run(reset_schema_cmd)
@@ -369,8 +383,13 @@ def restore_local(config, filename, clean=False):
             kill_sql = f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{local_conf['db_name']}' AND pid <> pg_backend_pid();"
             subprocess.run(['psql'] + auth_args + ['-c', kill_sql], env=env, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # 2. Drop & Create Schema
-            reset_sql = f"DROP OWNED BY {local_conf['db_user']} CASCADE;"
+            # 2. Drop & recreate toàn bộ schema public — đáng tin cậy hơn DROP OWNED BY
+            #    vì DROP SCHEMA xóa tất cả objects bất kể owner là ai
+            reset_sql = (
+                f"DROP SCHEMA public CASCADE; CREATE SCHEMA public; "
+                f"GRANT ALL ON SCHEMA public TO {local_conf['db_user']}; "
+                f"GRANT ALL ON SCHEMA public TO public;"
+            )
             subprocess.run(['psql'] + auth_args + ['-c', reset_sql], env=env, check=True)
             print("  [CLEAN] Schema reset successful.")
         except subprocess.CalledProcessError as e:
