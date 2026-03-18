@@ -273,14 +273,32 @@ def restore_prod(config, filename, clean=False):
             f"{prefix}psql {_db_host_arg(prod_conf)}-U {prod_conf['db_user']} -d {prod_conf['db_name']} "
             f"-c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{prod_conf['db_name']}' AND pid <> pg_backend_pid();\""
         )
-        # 2. Drop & recreate toàn bộ schema public — đáng tin cậy hơn DROP OWNED BY
-        #    vì DROP SCHEMA xóa tất cả objects bất kể owner là ai
-        reset_schema_cmd = (
-            f"{prefix}psql {_db_host_arg(prod_conf)}-U {prod_conf['db_user']} -d {prod_conf['db_name']} "
-            f"-c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public; "
-            f"GRANT ALL ON SCHEMA public TO {prod_conf['db_user']}; "
-            f"GRANT ALL ON SCHEMA public TO public;\""
-        )
+        # 2. Dùng superuser nếu có để DROP SCHEMA hoàn toàn (bypass ownership restrictions)
+        #    Nếu không có superuser, fallback về DROP OWNED BY current_user
+        su_user = prod_conf.get('db_superuser')
+        if su_user:
+            su_pass = prod_conf.get('db_superuser_password', '')
+            docker = prod_conf.get('docker_container')
+            if docker:
+                su_env_flag = f"-e PGPASSWORD='{su_pass}' " if su_pass else ""
+                su_prefix = f"docker exec {su_env_flag}{docker} "
+            else:
+                su_prefix = f"PGPASSWORD='{su_pass}' " if su_pass else ""
+            reset_schema_cmd = (
+                f"{su_prefix}psql -v ON_ERROR_STOP=1 {_db_host_arg(prod_conf)}-U {su_user} -d {prod_conf['db_name']} "
+                f"-c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public; "
+                f"GRANT ALL ON SCHEMA public TO {prod_conf['db_user']}; "
+                f"GRANT ALL ON SCHEMA public TO public;\""
+            )
+        else:
+            # Fallback: DROP OWNED BY chỉ xóa objects owned bởi db_user
+            reset_schema_cmd = (
+                f"{prefix}psql -v ON_ERROR_STOP=1 {_db_host_arg(prod_conf)}-U {prod_conf['db_user']} -d {prod_conf['db_name']} "
+                f"-c \"DROP OWNED BY current_user CASCADE; "
+                f"DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; "
+                f"GRANT ALL ON SCHEMA public TO {prod_conf['db_user']}; "
+                f"GRANT ALL ON SCHEMA public TO public;\""
+            )
 
         try:
             conn.run(kill_cmd, hide=True, warn=True) # warn=True because it might fail if we kill ourself or no perms, but worth trying
@@ -321,14 +339,32 @@ def restore_staging(config, filename, clean=False):
             f"{prefix}psql {_db_host_arg(staging_conf)}-U {staging_conf['db_user']} -d {staging_conf['db_name']} "
             f"-c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{staging_conf['db_name']}' AND pid <> pg_backend_pid();\""
         )
-        # 2. Drop & recreate toàn bộ schema public — đáng tin cậy hơn DROP OWNED BY
-        #    vì DROP SCHEMA xóa tất cả objects bất kể owner là ai
-        reset_schema_cmd = (
-            f"{prefix}psql {_db_host_arg(staging_conf)}-U {staging_conf['db_user']} -d {staging_conf['db_name']} "
-            f"-c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public; "
-            f"GRANT ALL ON SCHEMA public TO {staging_conf['db_user']}; "
-            f"GRANT ALL ON SCHEMA public TO public;\""
-        )
+        # 2. Dùng superuser nếu có để DROP SCHEMA hoàn toàn (bypass ownership restrictions)
+        #    Nếu không có superuser, fallback về DROP OWNED BY current_user
+        su_user = staging_conf.get('db_superuser')
+        if su_user:
+            su_pass = staging_conf.get('db_superuser_password', '')
+            docker = staging_conf.get('docker_container')
+            if docker:
+                su_env_flag = f"-e PGPASSWORD='{su_pass}' " if su_pass else ""
+                su_prefix = f"docker exec {su_env_flag}{docker} "
+            else:
+                su_prefix = f"PGPASSWORD='{su_pass}' " if su_pass else ""
+            reset_schema_cmd = (
+                f"{su_prefix}psql -v ON_ERROR_STOP=1 {_db_host_arg(staging_conf)}-U {su_user} -d {staging_conf['db_name']} "
+                f"-c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public; "
+                f"GRANT ALL ON SCHEMA public TO {staging_conf['db_user']}; "
+                f"GRANT ALL ON SCHEMA public TO public;\""
+            )
+        else:
+            # Fallback: DROP OWNED BY chỉ xóa objects owned bởi db_user
+            reset_schema_cmd = (
+                f"{prefix}psql -v ON_ERROR_STOP=1 {_db_host_arg(staging_conf)}-U {staging_conf['db_user']} -d {staging_conf['db_name']} "
+                f"-c \"DROP OWNED BY current_user CASCADE; "
+                f"DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; "
+                f"GRANT ALL ON SCHEMA public TO {staging_conf['db_user']}; "
+                f"GRANT ALL ON SCHEMA public TO public;\""
+            )
 
         try:
             conn.run(kill_cmd, hide=True, warn=True) # warn=True because it might fail if we kill ourself or no perms, but worth trying
@@ -383,14 +419,31 @@ def restore_local(config, filename, clean=False):
             kill_sql = f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{local_conf['db_name']}' AND pid <> pg_backend_pid();"
             subprocess.run(['psql'] + auth_args + ['-c', kill_sql], env=env, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # 2. Drop & recreate toàn bộ schema public — đáng tin cậy hơn DROP OWNED BY
-            #    vì DROP SCHEMA xóa tất cả objects bất kể owner là ai
-            reset_sql = (
-                f"DROP SCHEMA public CASCADE; CREATE SCHEMA public; "
-                f"GRANT ALL ON SCHEMA public TO {local_conf['db_user']}; "
-                f"GRANT ALL ON SCHEMA public TO public;"
-            )
-            subprocess.run(['psql'] + auth_args + ['-c', reset_sql], env=env, check=True)
+            # 2. Dùng superuser nếu có để DROP SCHEMA hoàn toàn (bypass ownership restrictions)
+            #    Nếu không có superuser, fallback về DROP OWNED BY current_user
+            su_user = local_conf.get('db_superuser')
+            if su_user:
+                su_pass = local_conf.get('db_superuser_password', '')
+                su_env = os.environ.copy()
+                if su_pass:
+                    su_env['PGPASSWORD'] = su_pass
+                su_auth = ['-U', su_user, '-h', local_conf['host'], '-p', str(local_conf.get('port', 5432)), '-d', local_conf['db_name']]
+                reset_sql = (
+                    f"DROP SCHEMA public CASCADE; CREATE SCHEMA public; "
+                    f"GRANT ALL ON SCHEMA public TO {local_conf['db_user']}; "
+                    f"GRANT ALL ON SCHEMA public TO public;"
+                )
+                # ON_ERROR_STOP=1: psql exit non-zero khi SQL error → CalledProcessError được raise
+                subprocess.run(['psql', '-v', 'ON_ERROR_STOP=1'] + su_auth + ['-c', reset_sql], env=su_env, check=True)
+            else:
+                # Fallback: DROP OWNED BY chỉ xóa objects owned bởi db_user
+                reset_sql = (
+                    f"DROP OWNED BY current_user CASCADE; "
+                    f"DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; "
+                    f"GRANT ALL ON SCHEMA public TO {local_conf['db_user']}; "
+                    f"GRANT ALL ON SCHEMA public TO public;"
+                )
+                subprocess.run(['psql', '-v', 'ON_ERROR_STOP=1'] + auth_args + ['-c', reset_sql], env=env, check=True)
             print("  [CLEAN] Schema reset successful.")
         except subprocess.CalledProcessError as e:
             print(f"  [CLEAN] Warning: Failed to reset schema: {e}")
